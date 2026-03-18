@@ -1,0 +1,59 @@
+name: deploy-prod
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REGISTRY: 400953387571.dkr.ecr.eu-west-1.amazonaws.com
+  ECR_REPOSITORY: aws-estagio
+  ECS_CLUSTER: estagio-cluster
+  ECS_SERVICE: estagio-service
+  CONTAINER_NAME: estagio-app
+  TASK_DEFINITION: estagio-task
+
+jobs:
+  deploy:
+    name: Deploy-prod
+    runs-on: ubuntu-latest
+    environment: production
+
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Auth AWS
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{secrets.AWS_ROLE_ARN}}
+        aws-region: ${{env.AWS_REGION}}
+
+    - name: Docker ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, push 
+      id: build-image
+      env:
+        IMAGE_TAG: ${{ github.sha }}       
+      runs: | 
+        docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG . /
+        docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG /
+        echo "image=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Task 
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{env.TASK_DEFINITION}}
+        image: ${{steps.build-image.outputs.image}}
+        container-name: ${{env.CONTAINER_NAME}}
+    
+    - name: Deploy ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true

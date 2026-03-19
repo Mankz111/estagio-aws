@@ -1,0 +1,60 @@
+name: Deploy Desenvolvimento
+
+on:
+  push:
+    branches: [develop]
+
+env:
+  PROJECT_ID: norse-idea-490515-u7
+  REGION: europe-west1
+  SERVICE: estagio-app-dev
+  REPO: dev-branch
+
+jobs:
+  deploy:
+    name: Deploy Desenvolvimento
+    runs-on: ubuntu-latest
+    environment: development
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Autenticar no Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Instalar gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configurar Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build e Push
+        id: build-image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/estagio-app:$IMAGE_TAG .
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/estagio-app:$IMAGE_TAG
+
+      - name: Deploy no Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/estagio-app:${{ github.sha }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: URL da aplicação
+        run: |
+          gcloud run services describe ${{ env.SERVICE }} \
+            --region ${{ env.REGION }} \
+            --format="value(status.url)"
